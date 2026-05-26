@@ -1205,9 +1205,10 @@ struct MainView: View {
         return FirebaseConsole.url(forDocumentName: doc.name, project: p.projectId, database: d.databaseId)
     }
 
-    /// Banner shown in the pane where an error originated. Includes a Retry button
-    /// (wired through the model's `retry(_:)`), an optional alternative action like
-    /// "Pick another project", and a dismiss (×) button.
+    /// Banner shown in the pane where an error originated. The message itself is
+    /// inside a vertical ScrollView with a max height — very long error bodies
+    /// (verbose HTTP responses) scroll inside the banner instead of pushing the
+    /// dismiss / action buttons out of view.
     private func errorBanner(_ err: ContextualError, onDismiss: @escaping () -> Void) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
@@ -1215,11 +1216,15 @@ struct MainView: View {
                 .foregroundStyle(.red)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 4) {
-                Text(err.message)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                ScrollView(.vertical, showsIndicators: true) {
+                    Text(err.message)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .frame(maxHeight: 100)
                 HStack(spacing: 14) {
                     Button {
                         Task { await model.retry(err.retry) }

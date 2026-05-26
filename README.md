@@ -2,6 +2,8 @@
 
 A light, read-only macOS browser for Google Firestore. Sign in with your Google account and browse any Firestore project your account has access to.
 
+![Fyrestore showing a Firestore collection with filter, document list and field inspector](img/fyrestore-overview.png)
+
 - **Read-only** — no write or delete endpoints anywhere
 - **Single-binary** — pure Swift Package, no Firebase SDK
 - **Google sign-in** — one button, your browser, done. Works for any Google account.
