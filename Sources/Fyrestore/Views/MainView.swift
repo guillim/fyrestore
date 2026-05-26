@@ -10,9 +10,23 @@ enum RetryKind: Equatable {
     case loadDocuments
 }
 
+/// Optional second action offered alongside Retry. Used when "retrying the same
+/// operation" isn't the obvious recovery — e.g. a broken project pick where the
+/// user is really just looking for a way back to the picker.
+enum AlternativeAction: Equatable {
+    case pickAnotherProject
+
+    var label: String {
+        switch self {
+        case .pickAnotherProject: return "Pick another project"
+        }
+    }
+}
+
 struct ContextualError: Equatable {
     let message: String
     let retry: RetryKind
+    var alternative: AlternativeAction? = nil
 }
 
 @MainActor
@@ -119,13 +133,33 @@ final class BrowserModel: ObservableObject {
                     resetCollectionState()
                 }
             } catch {
-                sidebarError = ContextualError(message: describe(error), retry: .loadCollections)
+                sidebarError = ContextualError(
+                    message: describe(error),
+                    retry: .loadCollections,
+                    alternative: .pickAnotherProject
+                )
                 collections = []
                 resetCollectionState()
             }
             if currentPath != nil {
                 await reloadCurrentPath()
             }
+        }
+    }
+
+    /// Dispatch an alternative-action button click on an error banner.
+    /// Currently the only one is "pick another project" — which clears the broken
+    /// selection so the project dropdown becomes the obvious next step.
+    func handleAlternative(_ action: AlternativeAction) async {
+        switch action {
+        case .pickAnotherProject:
+            sidebarError = nil
+            documentListError = nil
+            selectedProject = nil
+            databases = []
+            selectedDatabase = nil
+            collections = []
+            resetCollectionState()
         }
     }
 
@@ -165,7 +199,11 @@ final class BrowserModel: ObservableObject {
             // If dbs is empty, the project simply has no Firestore database.
             // collections stays [], sidebar shows the empty-state message.
         } catch {
-            sidebarError = ContextualError(message: describe(error), retry: .loadDatabases)
+            sidebarError = ContextualError(
+                message: describe(error),
+                retry: .loadDatabases,
+                alternative: .pickAnotherProject
+            )
         }
     }
 
@@ -180,7 +218,11 @@ final class BrowserModel: ObservableObject {
             collections = try await client.listRootCollections(projectId: p.projectId, databaseId: d.databaseId)
             sidebarError = nil
         } catch {
-            sidebarError = ContextualError(message: describe(error), retry: .loadCollections)
+            sidebarError = ContextualError(
+                message: describe(error),
+                retry: .loadCollections,
+                alternative: .pickAnotherProject
+            )
         }
     }
 
@@ -278,6 +320,24 @@ final class BrowserModel: ObservableObject {
             documentListError = ContextualError(
                 message: "Document '\(targetDocId)' isn't in the first 100 results. Click Load more or filter to find it.",
                 retry: .loadDocuments)
+        }
+    }
+
+    /// Used by the breadcrumb when the user clicks a `.document` segment. The
+    /// segment at `segmentIndex` is the document; we navigate to its parent
+    /// collection (segmentIndex of the collection) and then select the doc.
+    func navigateToDocument(atSegmentIndex segmentIndex: Int) async {
+        guard let path = currentPath else { return }
+        guard segmentIndex < path.segments.count,
+              case .document(let docId) = path.segments[segmentIndex] else { return }
+        // The parent collection is at segmentIndex - 1; depth (1-based count of segments)
+        // to truncate to is segmentIndex (so we keep segments [0 ..< segmentIndex]).
+        let truncated = path.prefix(segmentIndex)
+        guard !truncated.collectionId.isEmpty else { return }
+        await enter(path: truncated)
+        if let target = documents.first(where: { $0.shortId == docId }) {
+            selectedDocument = target
+            await refreshSubcollectionsForSelection()
         }
     }
 
@@ -544,9 +604,7 @@ struct MainView: View {
             }
             collectionsList
             if let err = model.sidebarError {
-                errorBanner(message: err.message, retry: err.retry, onDismiss: {
-                    model.sidebarError = nil
-                })
+                errorBanner(err, onDismiss: { model.sidebarError = nil })
             }
         }
         .background(Theme.panel.opacity(0.6))
@@ -734,9 +792,7 @@ struct MainView: View {
             documentListHeader
 
             if let err = model.documentListError {
-                errorBanner(message: err.message, retry: err.retry, onDismiss: {
-                    model.documentListError = nil
-                })
+                errorBanner(err, onDismiss: { model.documentListError = nil })
             }
 
             if model.loadingDocuments && model.documents.isEmpty {
@@ -805,7 +861,6 @@ struct MainView: View {
 
     private func breadcrumb(for path: FirestorePath) -> some View {
         HStack(spacing: 4) {
-            // Each segment. Collections are clickable (truncate path); documents are labels.
             ForEach(Array(path.segments.enumerated()), id: \.offset) { item in
                 if item.offset > 0 {
                     Text("/")
@@ -814,6 +869,7 @@ struct MainView: View {
                 }
                 switch item.element {
                 case .collection(let id):
+                    // Trailing collection (where we currently are) is non-clickable.
                     if item.offset == path.segments.count - 1 {
                         Text(id)
                             .font(.system(size: 13, weight: .semibold, design: .monospaced))
@@ -825,15 +881,22 @@ struct MainView: View {
                             Text(id)
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundStyle(Theme.accent)
-                                .underline(false)
                         }
                         .buttonStyle(.plain)
                     }
                 case .document(let id):
-                    Text(id)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(Theme.textMuted)
-                        .lineLimit(1)
+                    // Click navigates to the collection containing this document, then
+                    // selects the document.
+                    Button {
+                        Task { await model.navigateToDocument(atSegmentIndex: item.offset) }
+                    } label: {
+                        Text(id)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(Theme.accent)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open this document")
                 }
             }
         }
@@ -1143,27 +1206,40 @@ struct MainView: View {
     }
 
     /// Banner shown in the pane where an error originated. Includes a Retry button
-    /// (wired through the model's `retry(_:)`) and a dismiss (×) button.
-    private func errorBanner(message: String, retry: RetryKind, onDismiss: @escaping () -> Void) -> some View {
+    /// (wired through the model's `retry(_:)`), an optional alternative action like
+    /// "Pick another project", and a dismiss (×) button.
+    private func errorBanner(_ err: ContextualError, onDismiss: @escaping () -> Void) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 11))
                 .foregroundStyle(.red)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 4) {
-                Text(message)
+                Text(err.message)
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Button {
-                    Task { await model.retry(retry) }
-                } label: {
-                    Text("Retry")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.accent)
+                HStack(spacing: 14) {
+                    Button {
+                        Task { await model.retry(err.retry) }
+                    } label: {
+                        Text("Retry")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.accent)
+                    }
+                    .buttonStyle(.plain)
+                    if let alt = err.alternative {
+                        Button {
+                            Task { await model.handleAlternative(alt) }
+                        } label: {
+                            Text(alt.label)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Theme.accent)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .buttonStyle(.plain)
             }
             Spacer(minLength: 4)
             Button(action: onDismiss) {
