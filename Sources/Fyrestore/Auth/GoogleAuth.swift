@@ -7,6 +7,10 @@ enum GoogleAuthError: LocalizedError {
     case missingCode
     case tokenExchangeFailed(String)
     case stateMismatch
+    /// Google refused the grant in a way that can't be retried silently — the refresh
+    /// token is revoked/expired, or Google's reauth policy kicked in (e.g. `invalid_rapt`
+    /// after ~24h on a Workspace account). The only recovery is a fresh interactive sign-in.
+    case needsReauth(reason: String)
 
     var errorDescription: String? {
         switch self {
@@ -14,6 +18,7 @@ enum GoogleAuthError: LocalizedError {
         case .missingCode: return "Google did not return an authorization code."
         case .tokenExchangeFailed(let msg): return "Token exchange failed: \(msg)"
         case .stateMismatch: return "OAuth state mismatch (possible CSRF)."
+        case .needsReauth(let reason): return "Session expired — please sign in again. (\(reason))"
         }
     }
 }
@@ -102,6 +107,13 @@ enum GoogleAuth {
         }
         if http.statusCode >= 400 {
             let body = String(data: data, encoding: .utf8) ?? "<no body>"
+            // Google returns `{"error":"invalid_grant", ...}` for refresh tokens that can no
+            // longer be exchanged silently: revoked, expired (7+ days idle), or — most often
+            // for us — `invalid_rapt`, which means Google's reauth policy now requires an
+            // interactive sign-in. None of these recover by retrying the refresh.
+            if let parsed = parseOAuthError(body), parsed.needsInteractiveReauth {
+                throw GoogleAuthError.needsReauth(reason: parsed.userFacingReason)
+            }
             throw GoogleAuthError.tokenExchangeFailed("HTTP \(http.statusCode): \(body)")
         }
         struct TokenResponse: Decodable {
@@ -139,5 +151,41 @@ enum GoogleAuth {
         var bytes = [UInt8](repeating: 0, count: byteCount)
         _ = SecRandomCopyBytes(kSecRandomDefault, byteCount, &bytes)
         return Data(bytes).base64URLEncodedString
+    }
+
+    private struct OAuthErrorBody {
+        let error: String
+        let description: String?
+        let subtype: String?
+
+        /// `invalid_grant` covers every refresh-token failure mode we care about
+        /// (revoked, expired, `invalid_rapt`). `invalid_client` is unrecoverable too
+        /// but the user clicking sign-in again won't fix it either — still, dropping
+        /// them on LoginView is friendlier than leaving them stuck in MainView.
+        var needsInteractiveReauth: Bool {
+            error == "invalid_grant" || error == "invalid_client"
+        }
+
+        /// Short, user-readable reason for the LoginView banner. Prefers the
+        /// subtype (e.g. `invalid_rapt`) since it's the most specific signal,
+        /// then the description, then the raw code.
+        var userFacingReason: String {
+            if let subtype, !subtype.isEmpty { return subtype }
+            if let description, !description.isEmpty { return description }
+            return error
+        }
+    }
+
+    private static func parseOAuthError(_ body: String) -> OAuthErrorBody? {
+        guard let data = body.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let code = obj["error"] as? String, !code.isEmpty else {
+            return nil
+        }
+        return OAuthErrorBody(
+            error: code,
+            description: obj["error_description"] as? String,
+            subtype: obj["error_subtype"] as? String
+        )
     }
 }

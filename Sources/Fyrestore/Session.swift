@@ -44,6 +44,7 @@ final class Session: ObservableObject {
     func signOut() {
         tokens = nil
         userEmail = nil
+        authError = nil
         try? tokenStore.clear()
     }
 
@@ -56,20 +57,49 @@ final class Session: ObservableObject {
             return tokens.accessToken
         }
         guard let refresh = tokens.refreshToken else {
-            self.tokens = nil
-            throw NSError(domain: "Fyrestore", code: 401, userInfo: [NSLocalizedDescriptionKey: "Session expired, please sign in again"])
+            invalidateSession(reason: "Session expired. Please sign in again.")
+            throw GoogleAuthError.needsReauth(reason: "no refresh token")
         }
-        let refreshed = try await GoogleAuth.refresh(
-            refreshToken: refresh,
-            clientID: Config.clientID,
-            clientSecret: Config.clientSecret
-        )
-        // Refresh response sometimes omits refresh_token; keep the existing one.
-        tokens.accessToken = refreshed.accessToken
-        tokens.expiresAt = refreshed.expiresAt
-        if let newRefresh = refreshed.refreshToken { tokens.refreshToken = newRefresh }
-        self.tokens = tokens
-        try? tokenStore.save(tokens)
-        return tokens.accessToken
+        do {
+            let refreshed = try await GoogleAuth.refresh(
+                refreshToken: refresh,
+                clientID: Config.clientID,
+                clientSecret: Config.clientSecret
+            )
+            // Refresh response sometimes omits refresh_token; keep the existing one.
+            tokens.accessToken = refreshed.accessToken
+            tokens.expiresAt = refreshed.expiresAt
+            if let newRefresh = refreshed.refreshToken { tokens.refreshToken = newRefresh }
+            self.tokens = tokens
+            try? tokenStore.save(tokens)
+            return tokens.accessToken
+        } catch let error as GoogleAuthError {
+            if case .needsReauth(let reason) = error {
+                invalidateSession(reason: "Your Google sign-in needs to be refreshed (\(reason)). Please sign in again.")
+            }
+            throw error
+        }
+    }
+
+    /// Mark the cached access token as stale so the next `accessToken()` call goes
+    /// through `refresh` regardless of `expiresAt`. Used by the API layer when the
+    /// server returns 401 with what we believed was still a valid token (revoked
+    /// server-side, scope mismatch, clock skew). The refresh token is left intact.
+    func invalidateAccessToken() {
+        guard var t = tokens else { return }
+        t.expiresAt = Date(timeIntervalSinceNow: -1)
+        tokens = t
+    }
+
+    /// Tear down the current session because the stored refresh token can no longer be
+    /// exchanged. Clears in-memory + Keychain tokens and surfaces `reason` on the
+    /// LoginView via `authError`. Setting `tokens = nil` causes `RootView` to flip
+    /// back to `LoginView` automatically — the user lands there with one obvious
+    /// next step (the "Sign in with Google" button).
+    private func invalidateSession(reason: String) {
+        tokens = nil
+        userEmail = nil
+        authError = reason
+        try? tokenStore.clear()
     }
 }

@@ -161,14 +161,31 @@ struct FirestoreClient {
         return data
     }
 
+    /// Builds an authorized request, sends it, and retries once if Google returns 401
+    /// — that happens when the access token we cached as "still valid" was actually
+    /// revoked or invalidated server-side (token rotation, scope change, clock skew).
+    /// On 401 we mark the cached token stale and rebuild the request, which forces
+    /// `Session.accessToken()` to go through `refresh`. If the refresh itself raises
+    /// `needsReauth`, `Session` will have already cleared the session and surfaced a
+    /// message on the LoginView; the error bubbles up so the in-flight UI call aborts.
+    private func performAuthorized(url: URL, method: String = "GET", body: Data? = nil) async throws -> Data {
+        let req = try await authorizedRequest(url: url, method: method, body: body)
+        do {
+            return try await send(req)
+        } catch FirestoreError.http(let code, _) where code == 401 {
+            await session.invalidateAccessToken()
+            let retryReq = try await authorizedRequest(url: url, method: method, body: body)
+            return try await send(retryReq)
+        }
+    }
+
     // MARK: - Projects
 
     func listProjects() async throws -> [GCPProject] {
         var url = URL(string: "https://cloudresourcemanager.googleapis.com/v1/projects")!
         var all: [GCPProject] = []
         while true {
-            let req = try await authorizedRequest(url: url)
-            let data = try await send(req)
+            let data = try await performAuthorized(url: url)
             let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
             let projects = (json["projects"] as? [[String: Any]]) ?? []
             for p in projects {
@@ -189,8 +206,7 @@ struct FirestoreClient {
 
     func listDatabases(projectId: String) async throws -> [FirestoreDatabase] {
         let url = URL(string: "https://firestore.googleapis.com/v1/projects/\(projectId)/databases")!
-        let req = try await authorizedRequest(url: url)
-        let data = try await send(req)
+        let data = try await performAuthorized(url: url)
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         let dbs = (json["databases"] as? [[String: Any]]) ?? []
         return dbs.compactMap { d in
@@ -216,8 +232,7 @@ struct FirestoreClient {
     private func listCollectionIds(parent: String) async throws -> [String] {
         let url = URL(string: "https://firestore.googleapis.com/v1/\(parent):listCollectionIds")!
         let body = "{}".data(using: .utf8)
-        let req = try await authorizedRequest(url: url, method: "POST", body: body)
-        let data = try await send(req)
+        let data = try await performAuthorized(url: url, method: "POST", body: body)
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         let ids = (json["collectionIds"] as? [String]) ?? []
         return ids.sorted()
@@ -234,8 +249,7 @@ struct FirestoreClient {
             items.append(URLQueryItem(name: "pageToken", value: pageToken))
         }
         comps.queryItems = items
-        let req = try await authorizedRequest(url: comps.url!)
-        let data = try await send(req)
+        let data = try await performAuthorized(url: comps.url!)
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         let raw = (json["documents"] as? [[String: Any]]) ?? []
         let docs = raw.compactMap { Self.decodeDocument($0) }
@@ -262,8 +276,7 @@ struct FirestoreClient {
             ]
         ]
         let bodyData = try JSONSerialization.data(withJSONObject: body)
-        let req = try await authorizedRequest(url: url, method: "POST", body: bodyData)
-        let data = try await send(req)
+        let data = try await performAuthorized(url: url, method: "POST", body: bodyData)
         // runQuery returns an array of entries, some of which may be empty (e.g. cursor markers).
         guard let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             return []
