@@ -68,7 +68,7 @@ final class BrowserModel: ObservableObject {
 
     /// Basic-mode inputs.
     @Published var basicField: String = ""
-    @Published var basicOp: QueryFilter.Op = .equal
+    @Published var basicOp: QueryFilter.Op = .contains
     @Published var basicValue: String = ""
 
     /// Advanced-mode free-text expression.
@@ -237,7 +237,7 @@ final class BrowserModel: ObservableObject {
         filterText = ""
         basicField = ""
         basicValue = ""
-        basicOp = .equal
+        basicOp = .contains
         appliedFilter = nil
         filterError = nil
     }
@@ -360,7 +360,7 @@ final class BrowserModel: ObservableObject {
         filterText = ""
         basicField = ""
         basicValue = ""
-        basicOp = .equal
+        basicOp = .contains
         appliedFilter = nil
         filterError = nil
         await reloadCurrentPath()
@@ -390,6 +390,7 @@ final class BrowserModel: ObservableObject {
             }
             selectedDocument = documents.first
             documentListError = nil
+            preselectDefaultField()
             await refreshSubcollectionsForSelection()
         } catch {
             documentListError = ContextualError(message: describe(error), retry: .loadDocuments)
@@ -430,7 +431,13 @@ final class BrowserModel: ObservableObject {
             let parsed: QueryFilter?
             switch filterMode {
             case .basic:
-                parsed = try QueryFilter.build(field: basicField, op: basicOp, rawValue: basicValue)
+                // The field/operator are preselected by default, so an empty value
+                // means "no filter" rather than a malformed one.
+                if basicValue.trimmingCharacters(in: .whitespaces).isEmpty {
+                    parsed = nil
+                } else {
+                    parsed = try QueryFilter.build(field: basicField, op: basicOp, rawValue: basicValue)
+                }
             case .advanced:
                 parsed = try QueryFilter.parse(filterText)
             }
@@ -445,11 +452,27 @@ final class BrowserModel: ObservableObject {
         filterText = ""
         basicField = ""
         basicValue = ""
-        basicOp = .equal
+        basicOp = .contains
         filterError = nil
+        preselectDefaultField()
         guard appliedFilter != nil else { return }
         appliedFilter = nil
         await reloadCurrentPath()
+    }
+
+    /// Field preselected in the basic filter when the loaded documents have it.
+    static let defaultFilterField = "name"
+
+    /// Preselect `name` in the basic filter's field dropdown when no field is chosen
+    /// yet and the loaded documents have one. Only fills the input — nothing is
+    /// applied until the user submits.
+    private func preselectDefaultField() {
+        guard basicField.isEmpty,
+              documents.contains(where: { doc in
+                  doc.fields.contains { $0.name == Self.defaultFilterField }
+              })
+        else { return }
+        basicField = Self.defaultFilterField
     }
 
     /// Toggle between basic and advanced modes. Mirror the inputs across the boundary
@@ -461,7 +484,7 @@ final class BrowserModel: ObservableObject {
             // basic fields say (even if not yet applied).
             let f = basicField.trimmingCharacters(in: .whitespaces)
             let v = basicValue.trimmingCharacters(in: .whitespaces)
-            if !f.isEmpty || !v.isEmpty {
+            if !v.isEmpty || (!f.isEmpty && f != Self.defaultFilterField) {
                 filterText = "\(f) \(basicOp.symbol) \(v)".trimmingCharacters(in: .whitespaces)
             }
             filterMode = .advanced
@@ -1076,8 +1099,9 @@ struct MainView: View {
     private var hasFilterInput: Bool {
         model.appliedFilter != nil
             || !model.filterText.isEmpty
-            || !model.basicField.isEmpty
             || !model.basicValue.isEmpty
+            || (!model.basicField.isEmpty && model.basicField != BrowserModel.defaultFilterField)
+            || model.basicOp != .contains
     }
 
     /// One row in the document list. Whole row (including padding/spacer area) is
@@ -1159,6 +1183,9 @@ struct MainView: View {
                     fieldSearch: $fieldSearch,
                     consoleURL: firebaseConsoleURL(for: doc)
                 )
+                // Pinned above the fields so sub-collections stay reachable without
+                // scrolling past a long document.
+                subcollectionsSection(for: doc)
                 ScrollView {
                     VStack(spacing: 0) {
                         let visibleFields = filteredFields(of: doc)
@@ -1179,7 +1206,6 @@ struct MainView: View {
                                 Divider().background(Theme.divider)
                             }
                         }
-                        subcollectionsSection(for: doc)
                     }
                     .padding(.vertical, 4)
                 }
@@ -1285,9 +1311,10 @@ struct MainView: View {
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(Rectangle().frame(height: 1).foregroundStyle(Theme.divider), alignment: .bottom)
         }
     }
 
