@@ -25,7 +25,19 @@ enum GoogleAuthError: LocalizedError {
 
 enum GoogleAuth {
     /// Runs the full OAuth 2.0 + PKCE flow against Google using a loopback redirect.
-    static func run(clientID: String, clientSecret: String, scopes: [String]) async throws -> OAuthTokens {
+    ///
+    /// `loginHint` is the email of the account that was last signed in. When present,
+    /// Google skips the account chooser, and we drop `prompt=consent` so an already
+    /// granted consent isn't asked again — a re-auth then only shows whatever Google
+    /// itself insists on (typically the password / 2FA challenge). Pass
+    /// `forceConsent: true` to get the full consent screen regardless.
+    static func run(
+        clientID: String,
+        clientSecret: String,
+        scopes: [String],
+        loginHint: String? = nil,
+        forceConsent: Bool = false
+    ) async throws -> OAuthTokens {
         let server = try LoopbackServer()
         let redirectURI = "http://127.0.0.1:\(server.port)/"
 
@@ -42,9 +54,15 @@ enum GoogleAuth {
             URLQueryItem(name: "code_challenge", value: challenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
             URLQueryItem(name: "state", value: state),
-            URLQueryItem(name: "access_type", value: "offline"),
-            URLQueryItem(name: "prompt", value: "consent")
+            URLQueryItem(name: "access_type", value: "offline")
         ]
+        let hint = loginHint?.trimmingCharacters(in: .whitespaces) ?? ""
+        if !hint.isEmpty {
+            comps.queryItems?.append(URLQueryItem(name: "login_hint", value: hint))
+        }
+        if forceConsent || hint.isEmpty {
+            comps.queryItems?.append(URLQueryItem(name: "prompt", value: "consent"))
+        }
 
         guard let authURL = comps.url else {
             throw GoogleAuthError.tokenExchangeFailed("Could not build authorization URL")

@@ -10,10 +10,19 @@ final class Session: ObservableObject {
 
     private let tokenStore = KeychainTokenStore()
 
+    /// Email of the last account that signed in. Survives a forced re-auth (but not
+    /// an explicit sign-out) so the next sign-in can skip the account chooser.
+    private static let lastEmailKey = "fyrestore.lastSignedInEmail"
+    private var lastEmail: String? {
+        get { UserDefaults.standard.string(forKey: Self.lastEmailKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.lastEmailKey) }
+    }
+
     init() {
         if let saved = tokenStore.load() {
             self.tokens = saved
             self.userEmail = saved.idTokenEmail
+            if let email = saved.idTokenEmail { lastEmail = email }
         }
     }
 
@@ -28,13 +37,27 @@ final class Session: ObservableObject {
         defer { isAuthenticating = false }
         authError = nil
         do {
-            let result = try await GoogleAuth.run(
+            var result = try await GoogleAuth.run(
                 clientID: Config.clientID,
                 clientSecret: Config.clientSecret,
-                scopes: Config.scopes
+                scopes: Config.scopes,
+                loginHint: lastEmail
             )
+            // The fast path skips the consent screen. If Google didn't hand back a
+            // refresh token that way, go through full consent once so silent
+            // refresh keeps working.
+            if result.refreshToken == nil {
+                result = try await GoogleAuth.run(
+                    clientID: Config.clientID,
+                    clientSecret: Config.clientSecret,
+                    scopes: Config.scopes,
+                    loginHint: lastEmail,
+                    forceConsent: true
+                )
+            }
             self.tokens = result
             self.userEmail = result.idTokenEmail
+            if let email = result.idTokenEmail { lastEmail = email }
             try? tokenStore.save(result)
         } catch {
             authError = "Sign-in failed: \(error.localizedDescription)"
@@ -45,6 +68,7 @@ final class Session: ObservableObject {
         tokens = nil
         userEmail = nil
         authError = nil
+        lastEmail = nil
         try? tokenStore.clear()
     }
 
