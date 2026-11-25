@@ -80,3 +80,7 @@ While the consent screen is in "Testing": max 100 named test users. To open it t
 
 - macOS 13+
 - Xcode 15+ or Swift 5.9+ (only needed to build from source)
+
+## License
+
+[MIT](LICENSE)
