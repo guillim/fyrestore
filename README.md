@@ -78,7 +78,7 @@ While the consent screen is in "Testing": max 100 named test users. To open it t
 
 ### 6. Send it to TestFlight
 
-The TestFlight build is a second, sandboxed build of the same sources (the Mac App Store only accepts sandboxed apps). It is described by `project.yml` and `Config/`, turned into an Xcode project by [XcodeGen](https://github.com/yonaskolb/XcodeGen), and archived and uploaded by `scripts/testflight.sh`. It has not uploaded a build yet: no Apple account was available when it was written.
+The TestFlight build is a second, sandboxed build of the same sources (the Mac App Store only accepts sandboxed apps). It is described by `project.yml` and `Config/`, turned into an Xcode project by [XcodeGen](https://github.com/yonaskolb/XcodeGen), and archived and uploaded by `scripts/testflight.sh`.
 
 One-time setup (needs the [Apple Developer Program](https://developer.apple.com/programs/)):
 
@@ -106,7 +106,7 @@ gh workflow run testflight.yml -f version=0.2.0     # with a new version number
 
 The same exports let you upload from your Mac with `./scripts/testflight.sh`. `./scripts/testflight.sh --archive-only` builds the sandboxed app without any Apple account, at `.build/testflight/Fyrestore.xcarchive`.
 
-The version comes from `MARKETING_VERSION` in `Config/App.xcconfig`; the build number is a UTC timestamp. The icon in `Resources/Assets.xcassets` is a placeholder: replace the PNGs to change it.
+The version comes from `MARKETING_VERSION` in `Config/App.xcconfig`; the build number is a UTC timestamp. The icon lives in `Resources/Assets.xcassets` for this build and in `Resources/AppIcon.icns` for the direct-download build.
 
 ## Requirements
 
