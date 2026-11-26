@@ -1,0 +1,28 @@
+// Identity and versions of the App Store / TestFlight build. Everything a rename or a
+// re-sign needs is in this file.
+
+// Name under the icon.
+APP_DISPLAY_NAME = Fyrestore
+// Must match the app record in App Store Connect.
+PRODUCT_BUNDLE_IDENTIFIER = com.fyrestore.app
+
+// Version shown to testers. The build number is replaced with a UTC timestamp by
+// scripts/testflight.sh, because App Store Connect refuses a number it has already seen.
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+
+MACOSX_DEPLOYMENT_TARGET = 13.0
+SWIFT_VERSION = 5.0
+
+PRODUCT_NAME = Fyrestore
+INFOPLIST_FILE = Config/Info.plist
+GENERATE_INFOPLIST_FILE = NO
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+
+// The Mac App Store (and so TestFlight) only accepts sandboxed apps.
+CODE_SIGN_ENTITLEMENTS = Config/Fyrestore.entitlements
+ENABLE_HARDENED_RUNTIME = YES
+CODE_SIGN_STYLE = Automatic
+
+// Your Apple Developer team goes in Config/Local.xcconfig, which is not committed.
+#include? "Local.xcconfig"

@@ -1,0 +1,49 @@
+name: TestFlight
+
+# Archives the sandboxed Mac build and sends it to TestFlight. Started by hand from
+# the Actions tab (or `gh workflow run testflight.yml`), on the branch chosen there.
+# The work is done by scripts/testflight.sh, which runs the same way on a Mac.
+#
+# Signing is left to Xcode: with an App Store Connect API key it creates the
+# certificates and profiles it needs, so none is stored here. Six secrets, which
+# scripts/setup-testflight-secrets.sh can set for you:
+#   APPLE_TEAM_ID            Team ID (developer.apple.com > Membership details)
+#   ASC_KEY_ID               identifier of the API key
+#   ASC_ISSUER_ID            issuer identifier, shown above the list of keys
+#   ASC_PRIVATE_KEY          content of the .p8 file downloaded with the key
+#   FYRESTORE_CLIENT_ID      Google OAuth client compiled into the app
+#   FYRESTORE_CLIENT_SECRET  its companion string
+# The key is created in App Store Connect > Users and Access > Integrations,
+# with the Admin role, which Xcode needs to create certificates.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version shown to testers, e.g. 0.2.0 (blank: the one in Config/App.xcconfig)"
+        required: false
+        type: string
+
+# One upload at a time.
+concurrency:
+  group: testflight
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    name: Archive and upload
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Archive and upload to TestFlight
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          FYRESTORE_CLIENT_ID: ${{ secrets.FYRESTORE_CLIENT_ID }}
+          FYRESTORE_CLIENT_SECRET: ${{ secrets.FYRESTORE_CLIENT_SECRET }}
+          MARKETING_VERSION: ${{ inputs.version }}
+        run: ./scripts/testflight.sh

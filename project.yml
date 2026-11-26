@@ -1,0 +1,23 @@
+# Xcode project for the sandboxed App Store / TestFlight build, generated with XcodeGen
+# (`xcodegen generate`, done for you by scripts/testflight.sh). The generated
+# Fyrestore.xcodeproj is not committed. Day-to-day development still goes through
+# Package.swift and scripts/build-app.sh; both build the same sources.
+name: Fyrestore
+options:
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "13.0"
+targets:
+  Fyrestore:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/Fyrestore
+        excludes:
+          - "**/*.template"
+      - path: Resources/Assets.xcassets
+    # Identity, versions and signing all live in the xcconfig.
+    configFiles:
+      Debug: Config/App.xcconfig
+      Release: Config/App.xcconfig
+    scheme: {}

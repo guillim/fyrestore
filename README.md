@@ -76,6 +76,38 @@ The build is unsigned/un-notarized. First-time users right-click → Open to byp
 
 While the consent screen is in "Testing": max 100 named test users. To open it to anyone, click **Publish App**, then submit for **OAuth verification** (privacy policy URL + demo video + scope justification — typical turnaround 4–8 weeks). No code changes needed.
 
+### 6. Send it to TestFlight
+
+The TestFlight build is a second, sandboxed build of the same sources (the Mac App Store only accepts sandboxed apps). It is described by `project.yml` and `Config/`, turned into an Xcode project by [XcodeGen](https://github.com/yonaskolb/XcodeGen), and archived and uploaded by `scripts/testflight.sh`. It has not uploaded a build yet: no Apple account was available when it was written.
+
+One-time setup (needs the [Apple Developer Program](https://developer.apple.com/programs/)):
+
+1. Register the bundle identifier `com.fyrestore.app` at developer.apple.com → Identifiers. If it is taken, change `PRODUCT_BUNDLE_IDENTIFIER` in `Config/App.xcconfig`.
+2. Create the app in App Store Connect → Apps → **+** → New App, platform macOS, with that bundle identifier.
+3. Create an API key in App Store Connect → Users and Access → Integrations, with the **Admin** role (Xcode needs it to create certificates), and download the `.p8` file.
+4. Store the secrets in the GitHub repository:
+
+   ```sh
+   export APPLE_TEAM_ID="ABCDE12345"            # developer.apple.com > Membership details
+   export ASC_KEY_ID="XXXXXXXXXX"
+   export ASC_ISSUER_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+   export ASC_KEY_PATH="$HOME/Downloads/AuthKey_XXXXXXXXXX.p8"
+   ./scripts/setup-testflight-secrets.sh
+   ```
+
+5. In App Store Connect → TestFlight, create an internal group with automatic distribution, so every new build reaches its testers without a click.
+
+Then, for each build:
+
+```sh
+gh workflow run testflight.yml                      # or Actions tab > TestFlight > Run workflow
+gh workflow run testflight.yml -f version=0.2.0     # with a new version number
+```
+
+The same exports let you upload from your Mac with `./scripts/testflight.sh`. `./scripts/testflight.sh --archive-only` builds the sandboxed app without any Apple account, at `.build/testflight/Fyrestore.xcarchive`.
+
+The version comes from `MARKETING_VERSION` in `Config/App.xcconfig`; the build number is a UTC timestamp. The icon in `Resources/Assets.xcassets` is a placeholder: replace the PNGs to change it.
+
 ## Requirements
 
 - macOS 13+

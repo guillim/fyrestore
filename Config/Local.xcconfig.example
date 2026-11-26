@@ -1,0 +1,4 @@
+// Copy this file to Local.xcconfig and fill in your team identifier
+// (developer.apple.com > Membership details > Team ID). Only needed to run the
+// sandboxed build from Xcode; scripts/testflight.sh takes the team from APPLE_TEAM_ID.
+DEVELOPMENT_TEAM = ABCDE12345
