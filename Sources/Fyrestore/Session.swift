@@ -6,6 +6,9 @@ final class Session: ObservableObject {
     @Published var tokens: OAuthTokens?
     @Published var userEmail: String?
     @Published var authError: String?
+    /// True when `authError` explains that Google ended the session, rather than
+    /// reporting a sign-in that failed. LoginView shows the two differently.
+    @Published var sessionExpired = false
     @Published var isAuthenticating = false
 
     private let tokenStore = KeychainTokenStore()
@@ -36,6 +39,7 @@ final class Session: ObservableObject {
         isAuthenticating = true
         defer { isAuthenticating = false }
         authError = nil
+        sessionExpired = false
         do {
             var result = try await GoogleAuth.run(
                 clientID: Config.clientID,
@@ -68,6 +72,7 @@ final class Session: ObservableObject {
         tokens = nil
         userEmail = nil
         authError = nil
+        sessionExpired = false
         lastEmail = nil
         try? tokenStore.clear()
     }
@@ -124,6 +129,7 @@ final class Session: ObservableObject {
         tokens = nil
         userEmail = nil
         authError = reason
+        sessionExpired = true
         try? tokenStore.clear()
     }
 }
